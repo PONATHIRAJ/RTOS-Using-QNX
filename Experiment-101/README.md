@@ -53,8 +53,8 @@ int main(void) {
 }
 ```
 ## Output
-![alt text](image-1.png)
----
+
+![alt text](qnx1.jpeg)---
 
 ## Result
 Thus, a simple Hello World application was successfully developed, compiled, and executed on the QNX operating system using both VMware virtual machine and Raspberry Pi hardware targets.
