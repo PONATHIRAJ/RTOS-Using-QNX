@@ -1,179 +1,262 @@
-# Experiment 402: Repeating Timer using Pulse Messages in QNX
+# Experiment 301: Message Passing between Client and Server in QNX
 
 ## Aim
 
-To implement a **repeating timer in QNX** that periodically wakes a thread by sending **pulse messages**.
+To implement **inter-process communication using message passing in QNX**, where a client sends a string to a server and receives a checksum as a reply.
 
 ---
 
 ## Objective
 
-* To understand **timer creation in QNX** using `timer_create()`.
-* To learn how **pulse events are generated using SIGEV_PULSE_INIT()`.
-* To demonstrate **periodic task execution using a repeating timer**.
+* To understand **QNX message passing mechanism**.
+* To implement **client-server communication using ChannelCreate(), MsgSend(), MsgReceive(), and MsgReply()**.
+* To calculate and return a **checksum for a string sent by the client**.
 
 ---
 
 ## Problem Statement
 
-Develop a QNX program that creates a **repeating timer**.
-When the timer expires, it sends a **pulse message to a channel**.
-The program waits in a `MsgReceive()` loop and processes the pulse whenever the timer expires.
+Design a **QNX server and client program** where:
 
-The timer should:
-
-* Trigger the **first event after 5 seconds**.
-* Then **repeat every 1.5 seconds**.
+* The **server creates a communication channel** and waits for messages from clients.
+* The **client connects to the server using the server's PID and Channel ID**.
+* The client sends a **string message** to the server.
+* The server calculates a **checksum of the string**.
+* The server replies with the **calculated checksum**.
+* The client receives and prints the checksum.
 
 ---
 
 # Algorithm
+* Ensure that the header file: `msg_def.h` is created/copied for both the projects (server and client).
 
-1. Start the program.
-2. Declare variables for:
+## Server Algorithm
 
-   * Channel ID
-   * Connection ID
-   * Timer ID
-   * Timer specification
-   * Message structure for pulses.
-3. Create a **channel using `ChannelCreate()`**.
-4. Attach a **connection to the channel using `ConnectAttach()`**.
-5. Initialize a **pulse event using `SIGEV_PULSE_INIT()`**.
-6. Create a **timer using `timer_create()`**.
-7. Configure the timer using `itimerspec`:
+1. Start the server program.
+2. Create a communication channel using `ChannelCreate()`.
+3. Obtain the process ID using `getpid()`.
+4. Display the server **PID and Channel ID**.
+5. Enter an infinite loop to receive messages from clients.
+6. Wait for a message using `MsgReceive()`.
+7. Check the received message type.
+8. If the message type is **checksum request**:
 
-   * Set first expiry to **5 seconds**.
-   * Set repeating interval to **1.5 seconds**.
-8. Start the timer using `timer_settime()`.
-9. Enter an infinite loop.
-10. Wait for incoming messages using `MsgReceive()`.
-11. If a pulse message is received:
+   * Extract the string from the message.
+   * Call the checksum calculation function.
+9. Compute the checksum by summing ASCII values of characters in the string.
+10. Send the checksum back to the client using `MsgReply()`.
+11. If the message type is unknown, return an error using `MsgError()`.
+12. Continue waiting for the next message.
 
-    * Check the pulse code.
-12. If the pulse code matches the timer event:
+---
 
-    * Print **"Timer expired – pulse received"**.
-13. Continue waiting for the next timer pulse.
+## Client Algorithm
+
+1. Start the client program.
+2. Verify that command line arguments are provided.
+3. Read the following inputs from the arguments:
+
+   * Server PID
+   * Server Channel ID
+   * String to send.
+4. Establish a connection with the server using `ConnectAttach()`.
+5. Create a message structure containing the message type and string.
+6. Send the message to the server using `MsgSend()`.
+7. Wait for the server reply.
+8. Receive the checksum value from the server.
+9. Display the received checksum.
+10. Terminate the client program.
 
 ---
 
 # Program
 
-```c id="rtm0pf"
-/*
- * reptimer.c
- */
+## Server Program (server.c)
 
-#include <stdlib.h>
+```c
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <sys/neutrino.h>
-#include <sys/dispatch.h>
-#include <unistd.h>
-#include <signal.h>
-#include <time.h>
-#include <string.h>
+#include <process.h>
+#include "msg_def.h"
 
-#define TIMER_PULSE_EVENT (_PULSE_CODE_MINAVAIL + 7)
+int calculate_checksum(char *text);
 
-typedef union
+int main(void)
 {
-    struct _pulse pulse;
-} message_t;
-
-int main(int argc, char *argv[])
-{
+    int chid;
+    int pid;
     rcvid_t rcvid;
-    struct sigevent event;
-    int chid, coid;
-    message_t msg;
-    timer_t timerid;
-    struct itimerspec it;
+    cksum_msg_t msg;
+    int status;
+    int checksum;
 
-    chid = ChannelCreate(_NTO_CHF_PRIVATE);
+    chid = ChannelCreate(0);
     if (chid == -1)
     {
-        fprintf(stderr, "ChannelCreate failed: %s\n", strerror(errno));
+        perror("ChannelCreate()");
         exit(EXIT_FAILURE);
     }
 
-    coid = ConnectAttach(0, 0, chid, _NTO_SIDE_CHANNEL, 0);
-    if (coid == -1)
-    {
-        fprintf(stderr, "ConnectAttach failed: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-
-    SIGEV_PULSE_INIT(&event, coid, 10, TIMER_PULSE_EVENT, 0);
-
-    if (timer_create(CLOCK_MONOTONIC, &event, &timerid) == -1)
-    {
-        perror("timer_create");
-        exit(EXIT_FAILURE);
-    }
-
-    it.it_value.tv_sec = 5;
-    it.it_value.tv_nsec = 0;
-
-    it.it_interval.tv_sec = 1;
-    it.it_interval.tv_nsec = 500 * 1000 * 1000;
-
-    if (timer_settime(timerid, 0, &it, NULL) == -1)
-    {
-        perror("timer_settime");
-        exit(EXIT_FAILURE);
-    }
+    pid = getpid();
+    printf("Server's pid: %d, chid: %d\n", pid, chid);
 
     while (1)
     {
         rcvid = MsgReceive(chid, &msg, sizeof(msg), NULL);
-
         if (rcvid == -1)
         {
-            fprintf(stderr, "MsgReceive failed: %s\n", strerror(errno));
-            continue;
+            perror("MsgReceive");
+            exit(EXIT_FAILURE);
         }
 
-        if (rcvid == 0)
+        if (msg.msg_type == CKSUM_MSG_TYPE)
         {
-            switch (msg.pulse.code)
-            {
-                case TIMER_PULSE_EVENT:
-                    printf("got our pulse, the timer must have expired\n");
-                    break;
+            printf("Got a checksum message\n");
 
-                default:
-                    printf("unexpected pulse code: %d\n", msg.pulse.code);
-                    break;
-            }
+            checksum = calculate_checksum(msg.string_to_cksum);
+
+            status = MsgReply(rcvid, EOK, &checksum, sizeof(checksum));
+            if (status == -1)
+                perror("MsgReply");
+        }
+        else
+        {
+            printf("Got an unknown message type %d\n", msg.msg_type);
+
+            if (MsgError(rcvid, ENOSYS) == -1)
+                perror("MsgError");
         }
     }
+
+    return 0;
+}
+
+int calculate_checksum(char *text)
+{
+    char *c;
+    int cksum = 0;
+
+    for (c = text; *c != '\0'; c++)
+        cksum += *c;
+
+    return cksum;
 }
 ```
 
 ---
 
+## Client Program (client.c)
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/neutrino.h>
+#include "msg_def.h"
+
+int main(int argc, char* argv[])
+{
+    int coid;
+    cksum_msg_t msg;
+    int incoming_checksum;
+    int status;
+    int server_pid;
+    int server_chid;
+
+    if (argc != 4)
+    {
+        printf("ERROR: This program must be started with commandline arguments\n");
+        printf("Example:\n");
+        printf("client 482834 1 abcdefghi\n");
+        exit(EXIT_FAILURE);
+    }
+
+    server_pid = atoi(argv[1]);
+    server_chid = atoi(argv[2]);
+
+    printf("attempting to establish connection with server pid: %d, chid %d\n",
+           server_pid, server_chid);
+
+    coid = ConnectAttach(0, server_pid, server_chid, _NTO_SIDE_CHANNEL, 0);
+
+    if (coid == -1)
+    {
+        perror("ConnectAttach");
+        exit(EXIT_FAILURE);
+    }
+
+    msg.msg_type = CKSUM_MSG_TYPE;
+    strlcpy(msg.string_to_cksum, argv[3], sizeof(msg.string_to_cksum));
+
+    printf("Sending string: %s\n", msg.string_to_cksum);
+
+    status = MsgSend(coid, &msg, sizeof(msg),
+                     &incoming_checksum, sizeof(incoming_checksum));
+
+    if (status == -1)
+    {
+        perror("MsgSend");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("received checksum=%d from server\n", incoming_checksum);
+    printf("MsgSend return status: %d\n", status);
+
+    return EXIT_SUCCESS;
+}
+```
+---
+## Header file (msg_def.h)
+
+```c
+
+#ifndef MSG_DEF_H
+#define MSG_DEF_H
+
+#define CKSUM_MSG_TYPE  0x01
+#define MAX_STRING_SIZE 256
+
+typedef struct {
+    int msg_type;
+    char string_to_cksum[MAX_STRING_SIZE];
+} cksum_msg_t;
+
+#endif
+```
 # Expected Output
 
-```text id="aq8s4n"
-got our pulse, the timer must have expired
-got our pulse, the timer must have expired
-got our pulse, the timer must have expired
-got our pulse, the timer must have expired
-...
+### Server Side
+
+```
+Server's pid: 12345, chid: 1
+Got a checksum message
 ```
 
-*(The message appears every 1.5 seconds after the initial 5-second delay.)*
+### Client Side
+
+```
+attempting to establish connection with server pid: 12345, chid 1
+Sending string: abcdefghi
+received checksum=909 from server
+MsgSend return status: 0
+```
+
+*(The checksum value depends on the ASCII sum of characters in the string.)*
 
 ---
 
 # Output
+### Server Side
+<img width="1445" height="174" alt="Screenshot 2026-03-17 154045" src="https://github.com/user-attachments/assets/a6ff95f7-b474-4cd7-88e1-d09a631e0266" />
 
-<img width="1448" height="285" alt="image" src="https://github.com/user-attachments/assets/f6a0069c-db55-4401-b717-22836f8ade82" />
+### Client Side
+<img width="1451" height="177" alt="Screenshot 2026-03-17 154017" src="https://github.com/user-attachments/assets/44f1cca0-dba0-4b2f-986c-0d6be0086521" />
+
 ---
 
 # Result
 
-Thus, a **repeating timer using pulse messages in QNX** was successfully implemented.
-The timer periodically generated pulses that were received through the **MsgReceive() loop**, demonstrating **periodic task execution in QNX**.
+Thus, the **client-server communication using QNX message passing** was successfully implemented.
+The client sent a string to the server, and the server calculated and returned the **checksum correctly**.
