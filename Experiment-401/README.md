@@ -1,4 +1,3 @@
-
 # Experiment 401: Interrupt Handling with Counter in QNX
 
 ## Aim
@@ -99,12 +98,16 @@ Interrupt received! , Count is 3
 Interrupt received! , Count is 4
 ...
 ```
-<img width="1447" height="643" alt="image" src="https://github.com/user-attachments/assets/ef5c6d38-b778-49a3-8bd5-3276c5797ded" />
+
 *(The counter increases each time the interrupt occurs.)*
+---
+
+# Output
+<img width="1889" height="934" alt="Screenshot 2026-03-17 090046" src="https://github.com/user-attachments/assets/821aefd2-51d3-407a-a679-88bb78459477" />
 
 ---
 
-## Result
+# Result
 
 Thus, the **hardware interrupt handling mechanism in QNX** was successfully implemented using `InterruptAttach()` and `InterruptWait()`.
 The program correctly detected interrupts and **maintained a counter showing the number of interrupts received**.
